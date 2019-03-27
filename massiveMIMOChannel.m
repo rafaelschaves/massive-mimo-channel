@@ -29,11 +29,9 @@
 % Based Antenna Selection in Massive MIMO Systems" in 2015 IEEE 26th Annual
 % International Symposium on Personal, Indoor, and Mobile Radio
 % Communications, 2015, pp. 563–568.
-
-function [H, beta, varargout] = massiveMIMOChannel(commcell, ...
-                                                   fading,   ...
-                                                   varargin)
-                                               
+%
+% Help:
+%
 % [H, beta, varargout] = multipathMUMIMOChannel(cell,   ...
 %                                               fading, ...
 %                                               varargin)
@@ -75,7 +73,10 @@ function [H, beta, varargout] = massiveMIMOChannel(commcell, ...
 %           postive real number.
 %
 %           * 'commcell.city' is the field with the type of the city, it 
-%           must be a string.
+%           must be a string. It can be 'LARGE', 'MEDIUM' or 'SMALL'.
+%
+%           * 'fading' is the type of desired fading channel, it must be a
+%           string. It can be 'RAYLEIGH', 'UR-LOS' or 'SPARSE'.
 %
 %         -- 'varargin{1}' is a structure that contains predefined position 
 %         for the users and the objects interfering in the transmission.
@@ -112,6 +113,10 @@ function [H, beta, varargout] = massiveMIMOChannel(commcell, ...
 %         -- 'varargout{2}' is a vector with the position and the angle of
 %         arrival for all interfering objects.
 
+function [H, beta, varargout] = massiveMIMOChannel(commcell, ...
+                                                   fading,   ...
+                                                   varargin)
+                                              
 % MACROS
 
 N_ARGIN  = 4;                                                              % Number of input arguments
@@ -134,7 +139,8 @@ mean_shadow_fad_dB    = commcell.meanShadowFad;                            % Sha
 std_dev_shadow_fad_dB = commcell.stdDevShadowFad;                          % Shadow fading standard deviation in dB
 city                  = commcell.city;                                     % Type of the city
 
-fading                = upper(fading);                                     % Type of fading that occurs in the transmission
+city   = upper(city);
+fading = upper(fading);                                                    % Type of fading that occurs in the transmission
 
 % Testing for errors
 
@@ -156,10 +162,6 @@ elseif (R <=0)
     error('Cell radius must be a positive real number');
 elseif (bs_height <= 0)
     error('Base station height must be a positive real number');
-elseif (lambda <= 0)
-    error('Wavelength must be a positive real number');
-elseif (ref_distance <= 0)
-    error('Reference distance must be a positive real number');
 end
 
 if (size(n_path,1) == 1)
@@ -174,14 +176,14 @@ H_user = user_height(1) + (user_height(2) - user_height(1))*rand(n_user,1);% Hei
 
 antenna_spacing = c/(2*f_c);                                               % Antenna spacing of transmitt array
 
-if (nargin == N_ARGIN - 1)
-    aux_cord = rand(K,1);
+if (nargin == N_ARGIN - 2)
+    aux_cord = rand(n_user,1);
     
     K_1 = sum(aux_cord < 1/3);
     K_2 = sum(aux_cord < 2/3 & aux_cord > 1/3);
     
-    u = rand(K,1);
-    v = rand(K,1);
+    u = rand(n_user,1);
+    v = rand(n_user,1);
     
     u_1 = u(1:K_1,1);
     v_1 = v(1:K_1,1);
@@ -189,8 +191,8 @@ if (nargin == N_ARGIN - 1)
     u_2 = u(K_1+1:K_1+K_2,1);
     v_2 = v(K_1+1:K_1+K_2,1);
     
-    u_3 = u(K_1+K_2+1:K,1);
-    v_3 = v(K_1+K_2+1:K,1);
+    u_3 = u(K_1+K_2+1:n_user,1);
+    v_3 = v(K_1+K_2+1:n_user,1);
 
     x_1 = -R/2*u_1 + R*v_1;
     y_1 = r*u_1;
@@ -230,15 +232,9 @@ r_bs_user = sqrt(d_bs_user.^2 + (bs_height - H_user).^2);                  % Len
 
 z = lognrnd(mu_shadow_fad,sigma_shadow_fad,n_user,1);                      % Shadow fading                 
 
-beta = z.*pathLoss(city,h_bs,h_user,r_bs_user,f_c);                        % Large-scale fading
+beta = z.*pathLoss(city,bs_height,H_user,r_bs_user,f_c);                        % Large-scale fading
 
 switch fading
-    case 'RICH'
-        G = (randn(n_antenna,n_user) + 1i*randn(n_antenna,n_user))/sqrt(2);% Small-scale fading coefficient matrix with unitary matrix
-        
-        Beta = repmat(beta',n_antenna,1);
-        
-        H = sqrt(Beta).*G;                                                 % Uplink channel matrix
     case 'RAYLEIGH'
         G = (randn(n_antenna,n_user) + 1i*randn(n_antenna,n_user))/sqrt(2);% Small-scale fading coefficient matrix
         
@@ -253,7 +249,7 @@ switch fading
         
         H = G.*A;                                                          % Uplink channel matrix
     case 'SPARSE'
-        if (nargin == N_ARGIN - 2)
+        if (nargin < N_ARGIN)
             x_object = zeros(n_user,n_path(1));
             y_object = zeros(n_user,n_path(1));
                         
@@ -312,36 +308,39 @@ end
 
 end
 
-function [L,varargout] = pathLoss(city,h_bs,h_user,distance,f)
+function [L,varargout] = pathLoss(city,h_bs,h_user,distance,frequency)
 
 % COST-231 Hata Model
+
+frequency = frequency/1e6;
+distance = distance/1e3;
 
 switch city
    
     case 'LARGE'
-        if((150 <= f) && (f <= 200))
-            C_h = 8.29*(log10(1.54*h_user))^2 - 1.1;
-        elseif((200 < f) && (f <= 2000))
-            C_h = 3.2*(log10(11.75*h_user))^2 - 4.97;
+        if((150 <= frequency) && (frequency <= 200))
+            C_h = 8.29*(log10(1.54*h_user)).^2 - 1.1;
+        elseif((200 < frequency) && (frequency <= 2000))
+            C_h = 3.2*(log10(11.75*h_user)).^2 - 4.97;
         else
         end
         C = 3;
     case 'MEDIUM'        
-        C_h = 0.8 + (1.1*log10(f) - 0.7)*h_user - 1.56*log10(f);
+        C_h = 0.8 + (1.1*log10(frequency) - 0.7)*h_user - 1.56*log10(frequency);
         C = 0;
     case 'SMALL'
-        C_h = 0.8 + (1.1*log10(f) - 0.7)*h_user - 1.56*log10(f);
+        C_h = 0.8 + (1.1*log10(frequency) - 0.7)*h_user - 1.56*log10(frequency);
         C = 0;
     otherwise
         error('Invalid type of city');
 end
 
-L_dB = 46.30 + 33.90*log10(f) - 13.82*log10(h_bs) - C_h + ...
-       (44.9 - 6.55*log10(h_bs))*log10(distance) + C;
+L_dB = -(46.30 + 33.90*log10(frequency) - 13.82*log10(h_bs) - C_h + ...
+        (44.9 - 6.55*log10(h_bs))*log10(distance) + C);
      
 varargout{1} = L_dB;
 
-L = 10^(L_dB/10);
+L = 10.^(L_dB/10);
 
 end
 
