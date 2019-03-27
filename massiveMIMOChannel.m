@@ -21,14 +21,14 @@
 % International Symposium on Personal, Indoor, and Mobile Radio
 % Communications, 2015, pp. 563–568.
 
-function [H, beta, varargout] = massiveMIMOChannel(cell, ...
+function [H, beta, varargout] = massiveMIMOChannel(commcell, ...
                                                    propagation, ...
                                                    fading, ...
                                                    varargin)
-% [H, varargout] = multipathMUMIMOChannel(cell, ...
-%                                         propagation, ...
-%                                         fading, ...
-%                                         varargin)
+% [H, beta, varargout] = multipathMUMIMOChannel(cell, ...
+%                                               propagation, ...
+%                                               fading, ...
+%                                               varargin)
 %
 % Inputs:
 %
@@ -62,28 +62,31 @@ function [H, beta, varargout] = massiveMIMOChannel(cell, ...
 %
 %         -- 'H' is the uplink channel matrix, it is a complex matrix with
 %         size 'array.nAntennas' x 'channel.nUsers'.
+%
+%         -- 'beta' is the large-scale fading vector, it is a real vector
+%         with size 'channel.nUsers'.
 
 % MACROS
 
-N_ARGIN  = 4;
-N_ARGOUT = 5;
+N_ARGIN  = 4;                                                              % Number of input arguments
+N_ARGOUT = 5;                                                              % Number of output arguments
 
 % Cell parameters
 
-n_antenna             = cell.antenna;                                      % Number of transmit antennas at base station
-n_user                = cell.user;                                         % Number of user terminals
-R                     = cell.radius;                                       % Cell's raidus (circumradius) in meters
-bs_height             = cell.bs_height;                                    % Height of base station in meters
-user_height           = cell.user_height;                                  % Minimum and maximum heights of user terminals in meters
-n_multipath           = cell.multipath;                                    % Number of multipaths for each user terminal
+n_antenna             = commcell.nAntennas;                                % Number of transmit antennas at base station
+n_user                = commcell.nUsers;                                   % Number of user terminals
+R                     = commcell.radius;                                   % Cell's raidus (circumradius) in meters
+bs_height             = commcell.bsHeight;                                 % Height of base station in meters
+user_height           = commcell.userHeight;                               % Minimum and maximum heights of user terminals in meters
+n_path                = commcell.nPath;                                    % Number of multipaths for each user terminal
 
 % Propagation parameters
 
 lambda                = propagation.lambda;                                % Wavelength of transmitted signal
-ref_distance          = propagation.ref_distance;                          % Reference distance for path loss calculation
-mean_shadow_fad_dB    = propagation.mean_shadow_fad;                       % Shadow fading mean in dB
-std_dev_shadow_fad_dB = propagation.std_dev_shadow_fad;                    % Shadow fading standard deviation in dB
-path_loss_exponent    = propagation.path_loss_exponent;                    % Decay exponent
+ref_distance          = propagation.refDist;                               % Reference distance for path loss calculation
+mean_shadow_fad_dB    = propagation.meanShadowFad;                         % Shadow fading mean in dB
+std_dev_shadow_fad_dB = propagation.stdDevShadowFad;                       % Shadow fading standard deviation in dB
+path_loss_exponent    = propagation.pathLossExponent;                      % Decay exponent
 
 fading                = upper(fading);                                     % Type of fading that occurs in the transmission
 
@@ -95,11 +98,12 @@ if (nargin > N_ARGIN)
     error('Wrong number of input arguments');
 elseif (nargout > N_ARGOUT)
     error('Wrong number of output arguments');
-elseif ((strcmp(fading,'RICH')      || ...
-         strcmp(fading,'RAYLEIGH') || ...
-         strcmp(fading,'UR-LOS'))  && ...
-         nargout > N_ARGOUT-2)
+elseif (nargout > N_ARGOUT-2)
      error('Wrong number of output arguments');
+elseif(strcmp(fading,'RICH')     || ...
+       strcmp(fading,'RAYLEIGH') || ...
+       strcmp(fading,'UR-LOS'))
+     error('Invalid fading');
 end
 
 % Erros for wrong values in numeric variables
@@ -118,9 +122,9 @@ elseif (ref_distance <= 0)
     error('Reference distance must be a positive real number');
 end
 
-if (size(n_multipath,1) == 1)
-    n_multipath = repmat(n_multipath,n_user,1);
-elseif (size(n_multipath,1) ~= n_user)
+if (size(n_path,1) == 1)
+    n_path = repmat(n_path,n_user,1);
+elseif (size(n_path,1) ~= n_user)
     error('Invalid size of multipath');
 end
 
@@ -131,24 +135,35 @@ H_user = user_height(1) + (user_height(2) - user_height(1))*rand(n_user,1);% Hei
 antenna_spacing = lambda/2;                                                % Antenna spacing of transmitt array
 
 if (nargin == N_ARGIN - 1)
-    x_user = zeros(n_user,1);
-    y_user = zeros(n_user,1);
+    aux_cord = rand(K,1);
     
-    % Generating User Terminals Posistion
-    % Choosing user terminal coodinates inside the hexaginal cell
+    K_1 = sum(aux_cord < 1/3);
+    K_2 = sum(aux_cord < 2/3 & aux_cord > 1/3);
+    K_3 = sum(aux_cord > 2/3);
     
-    for k = 1:n_user
-        x_user(k) = -R + 2*R*rand(1);
-        y_user(k) = -r + 2*r*rand(1);
-        
-        while(y_user(k) + 2*r/R*x_user(k) - 2*r > 0 || ...
-                y_user(k) - 2*r/R*x_user(k) - 2*r > 0 || ...
-                y_user(k) + 2*r/R*x_user(k) + 2*r < 0 || ...
-                y_user(k) - 2*r/R*x_user(k) + 2*r < 0)
-            x_user(k) = -R + 2*R*rand(1);
-            y_user(k) = -r + 2*r*rand(1);
-        end
-    end
+    u = rand(K,1);
+    v = rand(K,1);
+    
+    u_1 = u(1:K_1,1);
+    v_1 = v(1:K_1,1);
+    
+    u_2 = u(K_1+1:K_1+K_2,1);
+    v_2 = v(K_1+1:K_1+K_2,1);
+    
+    u_3 = u(K_1+K_2+1:K,1);
+    v_3 = v(K_1+K_2+1:K,1);
+
+    x_1 = -R/2*u_1 + R*v_1;
+    y_1 = r*u_1;
+    
+    x_2 = -R/2*u_2 - R/2*v_2;
+    y_2 = -r*u_2 + r*v_2;
+    
+    x_3 = R*u_3 - R/2*v_3;
+    y_3 = -r*v_3;
+    
+    x_user = [x_1' x_2' x_3']';
+    y_user = [y_1' y_2' y_3']';
 elseif (nargin == N_ARGIN)
     coordinate = varargin{1};
     
@@ -179,7 +194,6 @@ z         = lognrnd(mu_shadow_fad,sigma_shadow_fad,n_user,1);              % Sha
 path_loss = ((lambda/(4*pi*ref_distance))^2).* ...
             (ref_distance./r_bs_user).^path_loss_exponent;                 % Path loss
 beta      = z.*path_loss;                                                  % Large-scale fading
-%beta = 1;
 
 switch fading
     case 'RICH'
@@ -206,13 +220,13 @@ switch fading
         H = G.*steering_vector*sqrt(diag(beta));                           % Uplink channel matrix
     case 'SPARSE'
         if (nargin == N_ARGIN - 1)
-            x_object = zeros(n_user,n_multipath(1));
-            y_object = zeros(n_user,n_multipath(1));
+            x_object = zeros(n_user,n_path(1));
+            y_object = zeros(n_user,n_path(1));
                         
             % Generating Interferung object coordinates
             
             for k = 1:n_user
-                for n = 1:n_multipath(k)
+                for n = 1:n_path(k)
                     if(x_user(k) >= 0)
                         x_object(k,n) = x_user(k)*rand(1);
                         y_object(k,n) = -r + 2*r*rand(1);
@@ -250,7 +264,7 @@ switch fading
         varargout{3} = [x_object y_object];
         varargout{4} = theta_object;
         
-        G = zeros(n_multipath(1),n_user);
+        G = zeros(n_path(1),n_user);
         H = zeros(n_antenna,n_user);
         
         for k = 1:n_user
@@ -259,7 +273,7 @@ switch fading
                                              antenna_spacing, ...
                                              lambda);
             
-            G(:,k) = randn(n_multipath(1),1) + 1i*randn(n_multipath(1),1); % Small-scale fading coefficient vector
+            G(:,k) = randn(n_path(1),1) + 1i*randn(n_path(1),1); % Small-scale fading coefficient vector
             G(:,k) = G(:,k)./sqrt(2);                                      % Small-scale fading coefficient vector with unitary variance
             
             H(:,k) = sqrt(beta(k))*steering_vector*G(:,k);                 % Uplink channel matrix
